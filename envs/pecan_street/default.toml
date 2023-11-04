@@ -1,6 +1,6 @@
 # ESS设置
 eta_ess = 0.95
-ess_level_init = 1.80
+ess_level_init = 1.2
 ess_level_max = 6.0
 ess_level_min = 0.6
 ess_aging_cost = 0.001
@@ -8,7 +8,7 @@ p_ess_max = 3
 # HVAC/温度设置
 p_hvac_max = 2
 T_min = 66.2
-T_max = 75.6
+T_max = 75.2
 beta_hvac = 1
 epsilon_hvac = 0.7
 eta_hvac = 2.5
