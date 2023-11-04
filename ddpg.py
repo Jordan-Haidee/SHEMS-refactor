@@ -45,22 +45,31 @@ class ReplayBuffer:
 class Actor(nn.Module):
     """actor网络"""
 
-    def __init__(self, state_dim, hidden_dim, action_dim, action_bound: np.ndarray):
+    def __init__(self, state_dim, hidden_dim, action_bound: np.ndarray):
         super().__init__()
         self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(hidden_dim, action_dim)
+        self.relu1 = nn.ReLU()
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.relu2 = nn.ReLU()
         # tanh将输出限制在(-1,+1)之间
+        self.fc_ess = nn.Linear(hidden_dim, 1)
         self.tanh = nn.Tanh()
+        self.fc_hvac = nn.Linear(hidden_dim, 1)
+        self.sigmoid = nn.Sigmoid()
         # action_bound是环境可以接受的动作最大值
         self.action_bound = torch.from_numpy(action_bound).float()
 
     def forward(self, state_tensor):
         x = self.fc1(state_tensor)
-        x = self.relu(x)
+        x = self.relu1(x)
         x = self.fc2(x)
-        x = self.tanh(x)
-        return x * self.action_bound
+        x = self.relu2(x)
+        output_ess = self.fc_ess(x)
+        output_ess = self.action_bound[0] * self.tanh(output_ess)
+        output_hvac = self.fc_hvac(x)
+        output_hvac = self.action_bound[1] * self.sigmoid(output_hvac)
+        y = torch.cat([output_ess, output_hvac], dim=-1)
+        return y
 
 
 class Critic(nn.Module):
@@ -89,7 +98,7 @@ class DDPG:
     def __init__(
         self,
         env: Union[gym.Env, str],
-        heter: np.ndarray = np.array([0.5]),
+        heter: np.ndarray = np.array([0.5, 0.5, 0.5]),
         lr: float = 1e-3,
         sigma: float = 0.10,
         tau: float = 0.005,
@@ -112,9 +121,9 @@ class DDPG:
         state_dim = self.env.observation_space.shape[0]
         action_dim = self.env.action_space.shape[0]
         action_bound = self.env.action_space.high
-        self.actor = Actor(state_dim, hidden_dim, action_dim, action_bound).to(device)
+        self.actor = Actor(state_dim, hidden_dim, action_bound).to(device)
         self.critic = Critic(state_dim, hidden_dim, action_dim).to(device)
-        self.actor_target = Actor(state_dim, hidden_dim, action_dim, action_bound).to(device)
+        self.actor_target = Actor(state_dim, hidden_dim, action_bound).to(device)
         self.critic_target = Critic(state_dim, hidden_dim, action_dim).to(device)
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.critic_target.load_state_dict(self.critic.state_dict())
@@ -129,7 +138,9 @@ class DDPG:
         self.batch_size = batch_size
 
         # 训练时使用
-        self.save_dir = Path("result") / f"DDPG-{self.env_name}-{datetime.now().strftime(r'%Y-%m-%d-%H-%M-%S')}"
+        self.save_dir = (
+            Path("result") / f"DDPG-{self.env_name.replace('envs:','')}-{datetime.now().strftime(r'%Y-%m-%d-%H-%M-%S')}"
+        )
         self.episode = 0
         self.episode_reward = 0
         self.episode_len = 0
@@ -142,29 +153,57 @@ class DDPG:
         """获取init中传入的超参数, 方便后续保存"""
         return {k: v for k, v in dic.items() if k not in ["self", "env", "kwargs"]}
 
+    @torch.no_grad()
     def get_action(self, s):
         """在训练时得到含噪声的连续动作"""
         if isinstance(s, np.ndarray) is True:
             s = torch.from_numpy(s).float().to(self.device)
-        with torch.no_grad():
-            a = self.actor(s)
-            a += torch.normal(0.0, self.sigma, a.shape)
-        return a.cpu().numpy()
+        a = self.actor(s) + torch.normal(0.0, self.sigma, a.shape)
+        a = a.cpu().numpy()
+        s = s.cpu().numpy()
+        p_ess, p_hvac = a
+        p_solar, p_load, ess_level, temp_outdoor, temp_indoor, price, _ = s
+        if p_ess >= 0:
+            p_ess = np.clip(
+                p_ess,
+                0,
+                min(
+                    (self.env.unwrapped.ess_level_max - ess_level) / self.env.unwrapped.eta_ess,
+                    self.env.unwrapped.p_ess_max,
+                ),
+            )
+        else:
+            p_ess = -np.clip(
+                -p_ess,
+                0,
+                min(
+                    (ess_level - self.env.unwrapped.ess_level_min) * self.env.unwrapped.eta_ess,
+                    self.env.unwrapped.p_ess_max,
+                ),
+            )
+        if temp_indoor <= self.env.unwrapped.T_min:
+            p_hvac = 0
+        if temp_indoor > self.env.unwrapped.T_max:
+            p_hvac = np.clip(p_hvac, 0.1, self.env.unwrapped.p_hvac_max)
+
+        return np.array([p_ess, p_hvac])
 
     def collect_exp_before_train(self):
         """开启训练之前预先往buffer里面存入一定数量的经验"""
         assert 0 < self.buffer_init_ratio < 1
         num = self.buffer_init_ratio * self.replay_buffer.capicity
         s, _ = self.env.reset()
-        while self.replay_buffer.size < num:
-            a = self.env.action_space.sample()
-            ns, r, t1, t2, _ = self.env.step(a)
-            d = t1 or t2
-            self.replay_buffer.push(s, a, r, ns, d)
-            s = ns if not t1 else self.env.reset()[0]
+        with tqdm(range(int(num))) as bar:
+            while self.replay_buffer.size < num:
+                a = self.env.action_space.sample()
+                ns, r, t1, t2, _ = self.env.step(a)
+                # self.replay_buffer.push(s, a, r, ns, t1)
+                self.replay_buffer.push(self.env.unwrapped.normalize_state(s), a, r, ns, t1)
+                s = ns if not t2 else self.env.reset()[0]
+                bar.update()
 
-    def update_target(self):
-        """定期同步权重参数到target"""
+    def soft_sync_target(self):
+        """软更新参数到target"""
         net_groups = [(self.actor, self.actor_target), (self.critic, self.critic_target)]
         for net, net_ in net_groups:
             for p, p_ in zip(net.parameters(), net_.parameters()):
@@ -189,7 +228,7 @@ class DDPG:
         actor_loss.backward()
         self.actor_optimizer.step()
         # 软更新target
-        self.update_target()
+        self.soft_sync_target()
         return actor_loss.detach(), critic_loss.detach()
 
     def log_info_per_episode(self):
@@ -228,17 +267,19 @@ class DDPG:
         # 开始训练
         s, _ = self.env.reset()
         while self.global_step < total_time_steps:
-            a = self.get_action(s)
+            # a = self.get_action(s)
+            a = self.get_action(self.env.unwrapped.normalize_state(s))
             ns, r, t1, t2, _ = self.env.step(a)
             self.episode_reward += r
-            self.replay_buffer.push(s, a, r, ns, t1)
+            # self.replay_buffer.push(s, a, r, ns, t1)
+            self.replay_buffer.push(self.env.unwrapped.normalize_state(s), a, r, ns, t1)
             if t1 or t2:
                 self.log_info_per_episode()
                 s, _ = self.env.reset()
             else:
                 s = ns
             actor_loss, critic_loss = self.train_one_batch()
-            self.log_info_per_batch(actor_loss, critic_loss)
+            self.log_info_per_batch(actor_loss.detach(), critic_loss.detach())
 
     def save(self, save_path: str, save_hyper: bool = True):
         """保存模型权重/超参数"""
