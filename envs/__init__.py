@@ -4,4 +4,5 @@ from gymnasium.envs.registration import register
 register(
     id="HEMS",
     entry_point="envs.pecan_street:HEMSEnv",
+    max_episode_steps=24,
 )

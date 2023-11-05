@@ -20,7 +20,6 @@ load_data_path = "data/base_load_modified.csv"
 temp_outdoor_data_path = "data/temp_modified.csv"
 price_data_path = "data/price_modified.csv"
 # 日期设置
-day_init = 0
-day_duration = 61
+day_range = [0, 61]
 # 卖电/购电价格比例
 price_ratio = 0.9

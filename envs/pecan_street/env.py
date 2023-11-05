@@ -2,10 +2,13 @@ from typing import Optional
 import pandas as pd
 import numpy as np
 import pytoml
-from addict import Dict
+import addict
 from pathlib import Path
 import gymnasium as gym
 import functools
+from typing import *
+
+import torch
 
 
 class HEMSEnv(gym.Env):
@@ -17,7 +20,7 @@ class HEMSEnv(gym.Env):
         heter: np.ndarray = np.array([0.5, 0.5, 0.5]),
     ) -> None:
         with open(config_path, encoding="utf-8") as f:
-            self.config = Dict(pytoml.load(f))
+            self.config = addict.Dict(pytoml.load(f))
         self.eta_ess = self.config.eta_ess
         self.ess_level_init = self.config.ess_level_init
         self.ess_level_max = self.config.ess_level_max * (heter[0] + 0.5)
@@ -36,8 +39,8 @@ class HEMSEnv(gym.Env):
         self.load_data_path = self.config.load_data_path
         self.temp_outdoor_data_path = self.config.temp_outdoor_data_path
         self.price_data_path = self.config.price_data_path
-        self.day_init = self.config.day_init
-        self.day_duration = self.config.day_duration
+        # ------------------------------------------------------------------
+        self.day_range = self.config.day_range
         self.price_ratio = self.config.price_ratio
 
         # 加载数据
@@ -85,8 +88,8 @@ class HEMSEnv(gym.Env):
             ]
         )
 
-    def normalize_state(self, s: np.ndarray):
-        s_ = np.zeros_like(s)
+    def normalize_state(self, s: Union[np.ndarray, torch.Tensor]):
+        s_ = np.zeros_like(s) if isinstance(s, np.ndarray) else torch.zeros_like(s)
         for i in range(self.observation_space.shape[0]):
             s_[i] = (s[i] - self.data_scope[i][0]) / (self.data_scope[i][1] - self.data_scope[i][0])
         return s_
@@ -129,28 +132,25 @@ class HEMSEnv(gym.Env):
             dtype=np.float32,
         )
         t1 = False
+        t2 = False
         info = {"c1": c1, "c2": c2, "c3": c3}
-        if self.day == self.day_init + self.day_duration - 1 and self.hour == 23:
-            t2 = True
-        else:
-            t2 = False
 
         return self.state, r, t1, t2, info
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
+        self.day = np.random.randint(*self.day_range)
         self.state = np.array(
             [
-                self.solar_data_table.iloc[self.day_init]["0:00"],
-                self.load_data_table.iloc[self.day_init]["0:00"],
+                self.solar_data_table.iloc[self.day]["0:00"],
+                self.load_data_table.iloc[self.day]["0:00"],
                 self.ess_level_init,
-                self.temp_outdoor_data_table.iloc[self.day_init]["0:00"],
+                self.temp_outdoor_data_table.iloc[self.day]["0:00"],
                 self.temp_indoor_init,
-                self.price_data_table.iloc[self.day_init]["0:00"],
+                self.price_data_table.iloc[self.day]["0:00"],
                 0,
             ],
             dtype=np.float32,
         )
-        self.day = self.day_init
         self.hour = 0
         info = {"day": self.day, "hour": self.hour}
         return self.state, info
