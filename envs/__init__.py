@@ -1,8 +1,14 @@
 """Registers the internal gym envs then loads the env plugins for module using the entry point."""
-from gymnasium.envs.registration import register
+from gymnasium.envs.registration import register, WrapperSpec
 
 register(
     id="HEMS",
-    entry_point="envs.pecan_street:HEMSEnv",
-    max_episode_steps=24,
+    entry_point="envs.envs:HEMSEnv",
+    additional_wrappers=(
+        WrapperSpec(
+            name="MaxEpisodeStepsLimit",
+            entry_point="envs.wrappers:MaxEpisodeStepsLimit",
+            kwargs={"max_episode_steps": None},
+        ),
+    ),
 )

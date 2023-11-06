@@ -1,23 +1,21 @@
-from typing import Optional
-import pandas as pd
-import numpy as np
-import pytoml
-import addict
-from pathlib import Path
-import gymnasium as gym
 import functools
-from typing import *
+from pathlib import Path
+from typing import Optional, Union
 
+import addict
+import gymnasium as gym
+import numpy as np
+import pandas as pd
+import pytoml
 import torch
 
 
 class HEMSEnv(gym.Env):
-    """TODO: 重构为一天24h为一个episode"""
-
     def __init__(
         self,
         config_path: str = Path(__file__).parent / "default.toml",
         heter: np.ndarray = np.array([0.5, 0.5, 0.5]),
+        is_test: bool = False,
     ) -> None:
         with open(config_path, encoding="utf-8") as f:
             self.config = addict.Dict(pytoml.load(f))
@@ -41,6 +39,8 @@ class HEMSEnv(gym.Env):
         self.price_data_path = self.config.price_data_path
         # ------------------------------------------------------------------
         self.day_range = self.config.day_range
+        if is_test is True:
+            self.day_range = [self.day_range[-1], self.day_range[-1] + 31]
         self.price_ratio = self.config.price_ratio
 
         # 加载数据
@@ -138,7 +138,8 @@ class HEMSEnv(gym.Env):
         return self.state, r, t1, t2, info
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
-        self.day = np.random.randint(*self.day_range)
+        # self.day = np.random.randint(*self.day_range)
+        self.day = self.day_range[0]
         self.state = np.array(
             [
                 self.solar_data_table.iloc[self.day]["0:00"],
