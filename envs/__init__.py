@@ -2,7 +2,7 @@
 from gymnasium.envs.registration import register, WrapperSpec
 
 register(
-    id="HEMS",
+    id="HEMS-heter",
     entry_point="envs.envs:HEMSEnv",
     additional_wrappers=(
         WrapperSpec(
