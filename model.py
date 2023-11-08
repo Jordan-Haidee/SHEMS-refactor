@@ -153,8 +153,7 @@ class DDPG:
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True)
         self.logger = tb.SummaryWriter(self.save_dir / "log")
-        self.collect_exp_before_train()
-        # 开始训练
+        self.first_train = True
         self.state, _ = self.env.reset()
 
     @torch.no_grad()
@@ -254,6 +253,9 @@ class DDPG:
         return actor_loss.detach(), critic_loss.detach()
 
     def train(self, train_batchs: int, disable_prog_bar: bool = True):
+        if self.first_train is True:
+            self.collect_exp_before_train()
+            self.first_train = False
         # 开始训练
         for _ in trange(train_batchs, disable=disable_prog_bar, ncols=80, leave=False):
             a = self.get_action(self.state, self.epsilon)
@@ -426,9 +428,9 @@ class FedDDPG:
         """保存权重"""
         Path(save_path).parent.mkdir(exist_ok=True)
         params = {
-            "weights": [
+            "weights": {
                 {"actor": self.server.actor.state_dict()},
                 {"critic": self.server.critic.state_dict()},
-            ]
+            }
         }
         torch.save(params, save_path)
