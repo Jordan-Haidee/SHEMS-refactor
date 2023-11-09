@@ -123,6 +123,7 @@ class DDPG:
         **kwargs,
     ):
         self.env = gym.make(env, heter=heter)
+        self.env_for_test = gym.make(env, heter=heter, is_test=True)
         self.env_name = self.env.spec.id
         self.env_index = env_index
         state_dim = self.env.observation_space.shape[0]
@@ -363,7 +364,7 @@ class FedDDPG:
                 for p in tqdm(self.points, leave=False, disable=True):
                     p.train(self.merge_interval)
                 self.server.merge_params(self.merge_target)
-                self.save(self.save_dir / "server" / f"aggre_{self.merge_idx}.pt")
+                self.save(self.save_dir / "server" / f"aggre_{m}.pt")
                 avg_merge_episode_reward = self.evaluate_avg_reward()
                 self.logger.add_scalar("aggregate/reward", avg_merge_episode_reward, global_step=m)
                 prog_bar.set_description_str(f"reward->{int(avg_merge_episode_reward):3d}|")
@@ -391,7 +392,7 @@ class FedDDPG:
 
     def evaluate_point_reward(self, point: DDPG):
         """传入一个节点, 评估奖励(不改变环境状态)"""
-        env = copy.deepcopy(point.env)
+        env = point.env_for_test
         point_r = 0
         for _ in range(self.episode_num_eval):
             s, _ = env.reset()
