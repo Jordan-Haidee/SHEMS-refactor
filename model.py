@@ -371,19 +371,14 @@ class FedDDPG:
                 prog_bar.update()
         self.summarize_point_reward()
         for p in self.points:
+            p.save(p.save_dir / "latest.pt")
             p.logger.close()
         self.logger.close()
 
     def train_baseline(self):
         """训练baseline用于对照"""
-        with trange(self.merge_num, ncols=80) as prog_bar:
-            for m in range(self.merge_num):
-                for p in self.points:
-                    p.train(self.merge_interval, disable_prog_bar=True)
-                avg_episode_reward = self.evaluate_avg_reward()
-                self.logger.add_scalar("Average/reward", avg_episode_reward, global_step=m)
-                prog_bar.set_description_str(f"reward->{int(avg_episode_reward):3d}")
-                prog_bar.update()
+        for p in tqdm(self.points):
+            p.train(self.merge_num * self.merge_interval, disable_prog_bar=False)
         self.summarize_point_reward()
         for p in self.points:
             p.save(p.save_dir / "latest.pt")

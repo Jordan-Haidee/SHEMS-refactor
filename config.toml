@@ -2,8 +2,8 @@
 save_dir = "result/FedDDPG-Avg"
 seed = 100
 device = "cpu"
-merge_interval = 50
-merge_num = 500
+merge_interval = 100
+merge_num = 200
 merge_target = true
 episode_num_eval = 1
 embedding_dim = 0
