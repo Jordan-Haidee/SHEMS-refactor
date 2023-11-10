@@ -371,7 +371,7 @@ class FedDDPG:
                 prog_bar.update()
         self.summarize_point_reward()
         for p in self.points:
-            p.save(p.save_dir / "latest.pt")
+            self.save(p.save_dir / "latest.pt")
             p.logger.close()
         self.logger.close()
 
@@ -424,9 +424,7 @@ class FedDDPG:
         """保存权重"""
         Path(save_path).parent.mkdir(exist_ok=True)
         params = {
-            "weights": {
-                {"actor": self.server.actor.state_dict()},
-                {"critic": self.server.critic.state_dict()},
-            }
+            "actor": self.server.actor.state_dict(),
+            "critic": self.server.critic.state_dict(),
         }
         torch.save(params, save_path)
