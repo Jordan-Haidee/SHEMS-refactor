@@ -168,34 +168,7 @@ class DDPG:
             s_ = self.env.unwrapped.normalize_state(s)
             a = self.actor(s_)
             a = a.cpu().numpy()
-        s = s.cpu().numpy()
-        # ---------------------------------------------------------------------------
-        p_ess, p_hvac = a
-        p_solar, p_load, ess_level, temp_outdoor, temp_indoor, price, _ = s
-        if p_ess >= 0:
-            p_ess = np.clip(
-                p_ess,
-                0,
-                min(
-                    (self.env.unwrapped.ess_level_max - ess_level) / self.env.unwrapped.eta_ess,
-                    self.env.unwrapped.p_ess_max,
-                ),
-            )
-        else:
-            p_ess = -np.clip(
-                -p_ess,
-                0,
-                min(
-                    (ess_level - self.env.unwrapped.ess_level_min) * self.env.unwrapped.eta_ess,
-                    self.env.unwrapped.p_ess_max,
-                ),
-            )
-        if temp_indoor <= self.env.unwrapped.T_min:
-            p_hvac = 0
-        if temp_indoor > self.env.unwrapped.T_max:
-            p_hvac = np.clip(p_hvac, 0.1, self.env.unwrapped.p_hvac_max)
-
-        return np.array([p_ess, p_hvac])
+        return a
 
     def collect_exp_before_train(self):
         """开启训练之前预先往buffer里面存入一定数量的经验"""
@@ -365,9 +338,6 @@ class FedDDPG:
                     p.train(self.merge_interval)
                 self.server.merge_params(self.merge_target)
                 self.save(self.save_dir / "server" / f"aggre_{m}.pt")
-                avg_merge_episode_reward = self.evaluate_avg_reward()
-                self.logger.add_scalar("aggregate/reward", avg_merge_episode_reward, global_step=m)
-                prog_bar.set_description_str(f"reward->{int(avg_merge_episode_reward):3d}|")
                 prog_bar.update()
         self.summarize_point_reward()
         for p in self.points:
