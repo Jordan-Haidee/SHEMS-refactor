@@ -21,8 +21,8 @@ class HEMSEnv(gym.Env):
             self.config = addict.Dict(pytoml.load(f))
         self.eta_ess = self.config.eta_ess
         self.ess_level_init = self.config.ess_level_init
-        self.ess_level_max = self.config.ess_level_max * (heter[0] + 0.5)
-        self.ess_level_min = self.config.ess_level_min * (heter[1] + 0.5)
+        self.ess_level_max = (self.config.ess_level_max - 1.8) + 3.6 * heter[0]
+        self.ess_level_min = (self.config.ess_level_min - 0.18) + 0.36 * heter[1]
         self.ess_aging_cost = self.config.ess_aging_cost
         self.p_ess_max = self.config.p_ess_max
         self.p_hvac_max = self.config.p_hvac_max
@@ -31,7 +31,7 @@ class HEMSEnv(gym.Env):
         self.beta_hvac = self.config.beta_hvac
         self.epsilon_hvac = self.config.epsilon_hvac
         self.eta_hvac = self.config.eta_hvac
-        self.A_hvac = self.config.A_hvac * (heter[2] + 0.5)
+        self.A_hvac = (self.config.A_hvac - 0.02) + 0.04 * heter[2]
         self.temp_indoor_init = self.config.temp_indoor_init
         self.solar_data_path = self.config.solar_data_path
         self.load_data_path = self.config.load_data_path
