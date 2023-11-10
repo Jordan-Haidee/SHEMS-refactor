@@ -89,6 +89,7 @@ class HEMSEnv(gym.Env):
         )
 
     def normalize_state(self, s: Union[np.ndarray, torch.Tensor]):
+        assert len(s.shape) == 1
         s_ = np.zeros_like(s) if isinstance(s, np.ndarray) else torch.zeros_like(s)
         for i in range(self.observation_space.shape[0]):
             s_[i] = (s[i] - self.data_scope[i][0]) / (self.data_scope[i][1] - self.data_scope[i][0])
@@ -138,7 +139,6 @@ class HEMSEnv(gym.Env):
         return self.state, r, t1, t2, info
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
-        # self.day = np.random.randint(*self.day_range)
         self.day = self.day_range[0]
         self.state = np.array(
             [
@@ -165,7 +165,6 @@ if __name__ == "__main__":
         a = env.action_space.sample()
         print(idx, s.round(4))
         s, r, t1, t2, _ = env.step(a)
-
         if t2:
             break
         idx += 1
