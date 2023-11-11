@@ -347,7 +347,7 @@ class FedDDPG:
 
     def train_baseline(self):
         """训练baseline用于对照"""
-        for p in tqdm(self.points):
+        for p in tqdm(self.points, ncols=80):
             p.train(self.merge_num * self.merge_interval, disable_prog_bar=False)
         self.summarize_point_reward()
         for p in self.points:
