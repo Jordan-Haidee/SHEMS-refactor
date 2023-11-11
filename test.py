@@ -11,6 +11,7 @@ from model import Actor
 
 parser = ArgumentParser(description="Test FedDDPG Algo & Baseline")
 parser.add_argument("save_dir", type=str, help="Exp result save directory")
+parser.add_argument("--valid", action="store_true", help="Whether is validation use training data or not")
 args = parser.parse_args()
 
 save_dir = Path(args.save_dir)
@@ -22,7 +23,7 @@ action_dim = env.action_space.shape[0]
 action_bound = env.action_space.high
 total_r = []
 for i in range(config.env_num):
-    env = gym.make(config.env, heter=config.heter_set[i], is_test=True)
+    env = gym.make(config.env, heter=config.heter_set[i], is_test=True if not args.valid else False)
     actor = Actor(state_dim, 400, action_bound)
     try:
         actor.load_state_dict(torch.load(save_dir / f"point-{i}" / "latest.pt").get("actor"))
