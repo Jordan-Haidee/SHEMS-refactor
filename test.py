@@ -46,38 +46,38 @@ for i in trange(config.env_num, ncols=80, desc="collecting info->"):
         actor.load_state_dict(torch.load(save_dir / f"point-{i}" / "latest.pt").get("actor"))
     except TypeError:
         actor.load_state_dict(torch.load(save_dir / f"point-{i}" / "latest.pt").get("weights").get("actor"))
-    l: List[Record] = []
+    traj: List[Record] = []
     s, _ = env.reset()
     with torch.no_grad():
         while True:
             a = actor(torch.from_numpy(env.unwrapped.normalize_state(s))).numpy()
             ns, r, t1, t2, info = env.step(a)
             c1, c2, c3 = info.values()
-            l.append(Record(s, env.unwrapped.clip_action(a), r, t1 or t2, c1, c2, c3))
+            traj.append(Record(s, env.unwrapped.clip_action(a), r, t1 or t2, c1, c2, c3))
             s = ns
             if t1 or t2:
-                point_record_list.append(l)
+                point_record_list.append(traj)
                 break
 
 # save info
 table_list: List[pd.DataFrame] = []
 for i in trange(config.env_num, ncols=80, desc="summarizing info->"):
-    l = point_record_list[i]
+    traj = point_record_list[i]
     detailed_table = pd.DataFrame(
         {
-            "ESS Level": [record.s[2] for record in l],
-            "Outdoor Temperature": [record.s[3] for record in l],
-            "Indoor Temperature": [record.s[4] for record in l],
-            "Price": [record.s[5] for record in l],
-            "Time Slot": [record.s[6] for record in l],
-            "ESS Power": [record.a[0] for record in l],
-            "HVAC Power": [record.a[1] for record in l],
-            "Total Cost": [-record.r for record in l],
-            "Energy Cost": np.array([record.c1 for record in l]) + np.array([record.c2 for record in l]),
-            "Discomfort Cost": [record.c3 for record in l],
-            "C1": [record.c1 for record in l],
-            "C2": [record.c2 for record in l],
-            "C3": [record.c3 for record in l],
+            "ESS Level": [record.s[2] for record in traj],
+            "Outdoor Temperature": [record.s[3] for record in traj],
+            "Indoor Temperature": [record.s[4] for record in traj],
+            "Price": [record.s[5] for record in traj],
+            "Time Slot": [record.s[6] for record in traj],
+            "ESS Power": [record.a[0] for record in traj],
+            "HVAC Power": [record.a[1] for record in traj],
+            "Total Cost": [-record.r for record in traj],
+            "Energy Cost": np.array([record.c1 for record in traj]) + np.array([record.c2 for record in traj]),
+            "Discomfort Cost": [record.c3 for record in traj],
+            "C1": [record.c1 for record in traj],
+            "C2": [record.c2 for record in traj],
+            "C3": [record.c3 for record in traj],
         }
     )
     Path(report_dir / f"point-{i}").mkdir()
