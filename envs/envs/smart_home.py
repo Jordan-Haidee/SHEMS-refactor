@@ -41,6 +41,7 @@ class HEMSEnv(gym.Env):
         self.day_range = self.config.day_range
         if is_test is True:
             self.day_range = [self.day_range[-1], self.day_range[-1] + 31]
+        self.day_duration = self.day_range[1] - self.day_range[0]
         self.price_ratio = self.config.price_ratio
 
         # 加载数据
