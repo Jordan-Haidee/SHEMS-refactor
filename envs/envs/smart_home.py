@@ -41,6 +41,7 @@ class HEMSEnv(gym.Env):
         self.day_range = self.config.day_range
         if is_test is True:
             self.day_range = [self.day_range[-1], self.day_range[-1] + 31]
+        self.day_duration = self.day_range[1] - self.day_range[0]
         self.price_ratio = self.config.price_ratio
 
         # 加载数据
@@ -95,9 +96,36 @@ class HEMSEnv(gym.Env):
             s_[i] = (s[i] - self.data_scope[i][0]) / (self.data_scope[i][1] - self.data_scope[i][0])
         return s_
 
+    def clip_action(self, a):
+        p_ess, p_hvac = a
+        p_solar, p_load, ess_level, temp_outdoor, temp_indoor, price, _ = self.state
+        if p_ess >= 0:
+            p_ess = np.clip(
+                p_ess,
+                0,
+                min(
+                    (self.ess_level_max - ess_level) / self.eta_ess,
+                    self.p_ess_max,
+                ),
+            )
+        else:
+            p_ess = -np.clip(
+                -p_ess,
+                0,
+                min(
+                    (ess_level - self.ess_level_min) * self.eta_ess,
+                    self.p_ess_max,
+                ),
+            )
+        if temp_indoor <= self.T_min:
+            p_hvac = 0
+        if temp_indoor > self.T_max:
+            p_hvac = np.clip(p_hvac, 0.1, self.p_hvac_max)
+        return np.array([p_ess, p_hvac])
+
     def step(self, a: np.ndarray):
         p_solar, p_load, ess_level, temp_outdoor, temp_indoor, price, _ = self.state
-        p_ess, p_hvac = a
+        p_ess, p_hvac = self.clip_action(a)
         # 计算ESS下一时隙的储能
         ess_level_next = ess_level + (p_ess * self.eta_ess if p_ess > 0 else p_ess / self.eta_ess)
         ess_level_next = np.clip(ess_level_next, self.ess_level_min, self.ess_level_max)
