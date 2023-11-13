@@ -1,8 +1,9 @@
 import copy
+import functools
 import random
 from collections import deque
 from pathlib import Path
-from typing import List, Union
+from typing import Callable, List, Union
 
 import gymnasium as gym
 import numpy as np
@@ -13,13 +14,6 @@ from torch.utils import tensorboard as tb
 from tqdm import tqdm, trange
 
 plt.switch_backend("agg")
-
-
-"""
-TODO: 添加动作噪声Gauss/epsilon
-TODO: 评估方式
-"""
-
 
 class ReplayBuffer:
     def __init__(self, capicity: int) -> None:
@@ -55,31 +49,44 @@ class ReplayBuffer:
 class Actor(nn.Module):
     """actor网络"""
 
-    def __init__(self, state_dim, hidden_dim, action_bound: np.ndarray):
+    def __init__(self, state_dim, hidden_dim, action_dim, action_scope: Union[List, np.ndarray]):
         super().__init__()
+        assert len(action_scope) == action_dim
+        self.action_scope = action_scope
+        # 定义网络结构
         self.fc1 = nn.Linear(state_dim, hidden_dim)
         self.relu1 = nn.ReLU()
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.relu2 = nn.ReLU()
+        self.fc3 = nn.Linear(hidden_dim, action_dim)
         # tanh将输出限制在(-1,+1)之间
-        self.fc_ess = nn.Linear(hidden_dim, 1)
         self.tanh = nn.Tanh()
-        self.fc_hvac = nn.Linear(hidden_dim, 1)
-        self.sigmoid = nn.Sigmoid()
-        # action_bound是环境可以接受的动作最大值
-        self.action_bound = torch.from_numpy(action_bound).float()
+        # 映射动作范围
+        self.map_layer = nn.Linear(action_dim, action_dim)
+        self.map_layer.weight.data.copy_(torch.diag(self.action_map[:, 0]))
+        self.map_layer.bias.data.copy_(self.action_map[:, 1])
+        self.map_layer.requires_grad_(False)
 
     def forward(self, state_tensor):
         x = self.fc1(state_tensor)
         x = self.relu1(x)
         x = self.fc2(x)
         x = self.relu2(x)
-        output_ess = self.fc_ess(x)
-        output_ess = self.action_bound[0] * self.tanh(output_ess)
-        output_hvac = self.fc_hvac(x)
-        output_hvac = self.action_bound[1] * self.sigmoid(output_hvac)
-        y = torch.cat([output_ess, output_hvac], dim=-1)
-        return y
+        x = self.fc3(x)
+        x = self.tanh(x)
+        x = self.map_layer(x)
+        return x
+
+    @property
+    @functools.lru_cache
+    def action_map(self) -> List[Callable]:
+        maps = []
+        for x1, x2 in self.action_scope:
+            A = [[-1, 1], [1, 1]]
+            B = [x1, x2]
+            k, b = np.linalg.solve(A, B)
+            maps.append([k, b])
+        return torch.tensor(maps).float()
 
 
 class Critic(nn.Module):
@@ -95,7 +102,7 @@ class Critic(nn.Module):
 
     def forward(self, state_tensor, action_tensor):
         """网络输入是状态和动作, 因此需要cat在一起"""
-        x = torch.cat([state_tensor, action_tensor], dim=-1)  # 拼接状态和动作
+        x = torch.cat([state_tensor, action_tensor], dim=-1)
         x = self.fc1(x)
         x = self.relu1(x)
         x = self.fc2(x)
@@ -128,10 +135,10 @@ class DDPG:
         self.env_index = env_index
         state_dim = self.env.observation_space.shape[0]
         action_dim = self.env.action_space.shape[0]
-        action_bound = self.env.action_space.high
-        self.actor = Actor(state_dim, hidden_dim, action_bound).to(device)
+        action_scope = list(zip(self.env.action_space.low, self.env.action_space.high))
+        self.actor = Actor(state_dim, hidden_dim, action_dim, action_scope).to(device)
         self.critic = Critic(state_dim, hidden_dim, action_dim).to(device)
-        self.actor_target = Actor(state_dim, hidden_dim, action_bound).to(device)
+        self.actor_target = Actor(state_dim, hidden_dim, action_dim, action_scope).to(device)
         self.critic_target = Critic(state_dim, hidden_dim, action_dim).to(device)
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.critic_target.load_state_dict(self.critic.state_dict())
