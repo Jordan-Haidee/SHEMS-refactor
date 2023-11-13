@@ -35,13 +35,13 @@ with open(save_dir / "config_backup.toml") as f:
 env = gym.make(config.env)
 state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.shape[0]
-action_bound = env.action_space.high
+action_scope = list(zip(env.action_space.low, env.action_space.high))
 
 point_record_list: List[List[Record]] = []
 # collect info
 for i in trange(config.env_num, ncols=80, desc="collecting info->"):
     env = gym.make(config.env, heter=config.heter_set[i], is_test=True if not args.valid else False)
-    actor = Actor(state_dim, config.hidden_dim, action_bound)
+    actor = Actor(state_dim, config.hidden_dim, action_dim, action_scope)
     try:
         actor.load_state_dict(torch.load(save_dir / f"point-{i}" / "latest.pt").get("actor"))
     except TypeError:
@@ -117,7 +117,7 @@ for i in trange(config.env_num, ncols=80, desc="summarizing info->"):
 
 # analyze avg performance
 avg_total_cost = np.array([table["Total Cost"].sum() for table in table_list]).mean()
-avg_energy_cost = np.array([table["Energy Cost"] for table in table_list]).mean()
+avg_energy_cost = np.array([table["Energy Cost"].sum() for table in table_list]).mean()
 avg_discomfort_cost = np.array([table["Discomfort Cost"].sum() for table in table_list]).mean()
 avg_maingrid_cost = np.array([table["C1"].sum() for table in table_list]).mean()
 avg_ess_cost = np.array([table["C2"].sum() for table in table_list]).mean()

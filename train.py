@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytoml
+import torch
 from addict import Dict
 
 from model import FedDDPG
@@ -15,10 +16,11 @@ args = parser.parse_args()
 
 with open(Path(__file__).parent / args.config, encoding="utf-8") as f:
     config = Dict(pytoml.load(f))
+# set random seed
+np.random.seed(config.seed)
+torch.manual_seed(config.seed)
 
 exp_start_time = datetime.now().strftime(r"%Y-%m-%d-%H-%M-%S")
-np.random.seed(config.seed)
-
 save_dir = Path(__file__).parent / f"{config.save_dir}-{exp_start_time}"
 save_dir.mkdir(parents=True)
 
