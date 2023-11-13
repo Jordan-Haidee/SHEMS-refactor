@@ -315,6 +315,7 @@ class FedDDPG:
         merge_target: bool,
         episode_num_eval: int,
         save_dir: str = None,
+        save_interval: int = 10,
         device: str = "cpu",
     ) -> None:
         assert save_dir is not None, "save_dir can't be empty"
@@ -325,6 +326,7 @@ class FedDDPG:
         self.merge_target = merge_target
         self.episode_num_eval = episode_num_eval
         self.save_dir = save_dir
+        self.save_interval = save_interval
 
         self.points = [DDPG(**c) for c in point_configs]
         self.server = Server(self.points, device=self.device)
@@ -337,8 +339,9 @@ class FedDDPG:
                 for p in tqdm(self.points, leave=False, disable=True):
                     p.train(self.merge_interval)
                 self.server.merge_params(self.merge_target)
-                self.save(self.save_dir / "server" / f"aggre_{m}.pt")
                 prog_bar.update()
+                if m % self.save_interval == 0 and m != 0:
+                    self.save(self.save_dir / "server" / f"merge_{m}.pt")
         self.summarize_point_reward()
         for p in self.points:
             self.save(p.save_dir / "latest.pt")
