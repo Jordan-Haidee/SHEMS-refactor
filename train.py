@@ -11,7 +11,6 @@ from model import FedDDPG
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", type=str, default="config.toml")
-parser.add_argument("--exp-num", type=int, default=1)
 args = parser.parse_args()
 
 with open(Path(__file__).parent / args.config, encoding="utf-8") as f:
