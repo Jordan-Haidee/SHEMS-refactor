@@ -15,6 +15,7 @@ from tqdm import tqdm, trange
 
 plt.switch_backend("agg")
 
+
 class ReplayBuffer:
     def __init__(self, capicity: int) -> None:
         self.capicity = capicity
@@ -49,7 +50,13 @@ class ReplayBuffer:
 class Actor(nn.Module):
     """actor网络"""
 
-    def __init__(self, state_dim, hidden_dim, action_dim, action_scope: Union[List, np.ndarray]):
+    def __init__(
+        self,
+        state_dim,
+        hidden_dim,
+        action_dim,
+        action_scope: Union[List, np.ndarray],
+    ):
         super().__init__()
         assert len(action_scope) == action_dim
         self.action_scope = action_scope
@@ -63,8 +70,8 @@ class Actor(nn.Module):
         self.tanh = nn.Tanh()
         # 映射动作范围
         self.map_layer = nn.Linear(action_dim, action_dim)
-        self.map_layer.weight.data.copy_(torch.diag(self.action_map[:, 0]))
-        self.map_layer.bias.data.copy_(self.action_map[:, 1])
+        self.map_layer.weight.data.copy_(torch.diag(self.action_mapping[:, 0]))
+        self.map_layer.bias.data.copy_(self.action_mapping[:, 1])
         self.map_layer.requires_grad_(False)
 
     def forward(self, state_tensor):
@@ -79,7 +86,7 @@ class Actor(nn.Module):
 
     @property
     @functools.lru_cache
-    def action_map(self) -> List[Callable]:
+    def action_mapping(self) -> List[Callable]:
         maps = []
         for x1, x2 in self.action_scope:
             A = [[-1, 1], [1, 1]]
@@ -114,9 +121,10 @@ class Critic(nn.Module):
 class DDPG:
     def __init__(
         self,
-        env: Union[gym.Env, str],
-        env_index: int,
-        heter: np.ndarray = np.array([0.5, 0.5, 0.5]),
+        env: str,
+        id: int,
+        heter: np.ndarray,
+        seed: Union[int, None] = None,
         lr: float = 1e-3,
         tau: float = 0.005,
         gamma: float = 0.98,
@@ -124,15 +132,15 @@ class DDPG:
         buffer_capicity: int = 10000,
         buffer_init_ratio: float = 0.30,
         batch_size: int = 64,
-        train_batchs: int = None,
+        train_batchs: Union[int, None] = None,
         device: str = "cpu",
-        save_dir: str = None,
+        save_dir: Union[str, None] = None,
         **kwargs,
     ):
-        self.env = gym.make(env, heter=heter)
-        self.env_for_test = gym.make(env, heter=heter, is_test=True)
+        self.env = gym.make(env, heter=heter, seed=seed)
+        self.env_for_test = gym.make(env, heter=heter, is_test=True, seed=seed)
         self.env_name = self.env.spec.id
-        self.env_index = env_index
+        self.id = id
         state_dim = self.env.observation_space.shape[0]
         action_dim = self.env.action_space.shape[0]
         action_scope = list(zip(self.env.action_space.low, self.env.action_space.high))
@@ -182,7 +190,7 @@ class DDPG:
         assert 0 < self.buffer_init_ratio < 1
         num = self.buffer_init_ratio * self.replay_buffer.capicity
         bar = tqdm(range(int(num)), leave=False, ncols=80)
-        bar.set_description_str(f"env:{self.env_index}->")
+        bar.set_description_str(f"env:{self.id}->")
         s, _ = self.env.reset()
         while self.replay_buffer.size < num:
             a = self.get_action(s, 1.0)
@@ -199,7 +207,10 @@ class DDPG:
 
     def soft_sync_target(self):
         """软更新参数到target"""
-        net_groups = [(self.actor, self.actor_target), (self.critic, self.critic_target)]
+        net_groups = [
+            (self.actor, self.actor_target),
+            (self.critic, self.critic_target),
+        ]
         for net, net_ in net_groups:
             for p, p_ in zip(net.parameters(), net_.parameters()):
                 p_.data.copy_(p.data * self.tau + p_.data * (1 - self.tau))
@@ -396,7 +407,11 @@ class FedDDPG:
             table.append(p.episode_reward_list[:min_length])
             np.save(p.save_dir / "episode_reward_list.npy", np.array(p.episode_reward_list))
         avg_episode_reward = np.array(table).mean(0)
-        plt.plot(range(min_length), avg_episode_reward), plt.grid(), plt.title("average episode reward")
+        (
+            plt.plot(range(min_length), avg_episode_reward),
+            plt.grid(),
+            plt.title("average episode reward"),
+        )
         plt.savefig(self.save_dir / "global" / "average_episode_reward.svg")
         plt.close()
 

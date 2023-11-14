@@ -15,6 +15,7 @@ class HEMSEnv(gym.Env):
         self,
         config_path: str = Path(__file__).parent / "default.toml",
         heter: np.ndarray = np.array([0.5, 0.5, 0.5]),
+        seed: int = None,
         is_test: bool = False,
     ) -> None:
         with open(config_path, encoding="utf-8") as f:
@@ -55,6 +56,8 @@ class HEMSEnv(gym.Env):
             low=np.array([-self.p_ess_max, 0]),
             high=np.array([self.p_ess_max, self.p_hvac_max]),
         )
+        if seed is not None:
+            self.action_space.seed(seed)
         self.observation_space = gym.spaces.Box(
             low=np.array([0, 0, 0, 0, -np.finfo(np.float32).max, 0, 0]),
             high=np.array(
