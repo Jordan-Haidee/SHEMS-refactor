@@ -1,23 +1,29 @@
 import argparse
 import copy
+import random
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import pytoml
+import rich
+import torch
 from addict import Dict
+from rich.panel import Panel
 
 from model import FedDDPG
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", type=str, default="config.toml")
 args = parser.parse_args()
-
 with open(Path(__file__).parent / args.config, encoding="utf-8") as f:
     config = Dict(pytoml.load(f))
 
-exp_start_time = datetime.now().strftime(r"%Y-%m-%d-%H-%M-%S")
+random.seed(config.seed)
 np.random.seed(config.seed)
+torch.manual_seed(config.seed)
+
+exp_start_time = datetime.now().strftime(r"%Y-%m-%d-%H-%M-%S")
 save_dir = Path(config.save_dir).parent / f"baseline-{exp_start_time}"
 save_dir.mkdir(parents=True)
 
@@ -55,5 +61,5 @@ model = FedDDPG(
     device=config.device,
     merge_target=config.merge_target,
 )
-print(f"Training baseline..., result saves to: \n{save_dir.absolute()}")
+rich.print(Panel(f"Training baseline..., result saves to: \n{save_dir.absolute()}"))
 model.train_baseline()
