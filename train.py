@@ -1,22 +1,25 @@
 import argparse
 import copy
+import random
 from datetime import datetime
 from pathlib import Path
 
+import addict
 import numpy as np
 import pytoml
 import torch
-from addict import Dict
 
 from model import FedDDPG
 
+# read config
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", type=str, default="config.toml")
 args = parser.parse_args()
-
 with open(Path(__file__).parent / args.config, encoding="utf-8") as f:
-    config = Dict(pytoml.load(f))
+    config = addict.Dict(pytoml.load(f))
+
 # set random seed
+random.seed(config.seed)
 np.random.seed(config.seed)
 torch.manual_seed(config.seed)
 
@@ -32,11 +35,12 @@ if config.embedding_dim > 0:
 with open(save_dir / "config_backup.toml", "w") as f:
     pytoml.dump(backup_config, f)
 
-env_config_list = [
+ddpg_config_list = [
     {
         "env": config.env,
+        "id": i,
         "heter": heter_set[i],
-        "env_index": i,
+        "seed": config.seed + i,
         "hidden_dim": config.hidden_dim,
         "lr": config.lr,
         "gamma": config.gamma,
@@ -53,7 +57,7 @@ env_config_list = [
 ]
 
 model = FedDDPG(
-    point_configs=env_config_list,
+    point_configs=ddpg_config_list,
     merge_num=config.merge_num,
     merge_interval=config.merge_interval,
     episode_num_eval=config.episode_num_eval,
@@ -61,4 +65,5 @@ model = FedDDPG(
     merge_target=config.merge_target,
     device=config.device,
 )
+print(f"Training..., result saves to: \n{save_dir.absolute()}")
 model.train()

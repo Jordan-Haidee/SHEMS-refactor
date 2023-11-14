@@ -26,11 +26,12 @@ backup_config = {**copy.deepcopy(config), "heter_set": heter_set.tolist()}
 with open(save_dir / "config_backup.toml", "w") as f:
     pytoml.dump(backup_config, f)
 
-env_config_list = [
+ddpg_config_list = [
     {
         "env": config.env,
+        "id": i,
         "heter": heter_set[i],
-        "env_index": i,
+        "seed": config.seed + i,
         "embedding_init": None,
         "lr": config.lr,
         "gamma": config.gamma,
@@ -46,7 +47,7 @@ env_config_list = [
 ]
 
 model = FedDDPG(
-    point_configs=env_config_list,
+    point_configs=ddpg_config_list,
     merge_interval=config.merge_interval,
     merge_num=config.merge_num,
     episode_num_eval=config.episode_num_eval,
@@ -54,4 +55,5 @@ model = FedDDPG(
     device=config.device,
     merge_target=config.merge_target,
 )
+print(f"Training baseline..., result saves to: \n{save_dir.absolute()}")
 model.train_baseline()
