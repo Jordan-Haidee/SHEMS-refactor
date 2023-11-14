@@ -15,6 +15,7 @@ from model import FedDDPG
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", type=str, default="config.toml")
+parser.add_argument("--no-heter", action="store_true")
 args = parser.parse_args()
 with open(Path(__file__).parent / args.config, encoding="utf-8") as f:
     config = Dict(pytoml.load(f))
@@ -27,7 +28,11 @@ exp_start_time = datetime.now().strftime(r"%Y-%m-%d-%H-%M-%S")
 save_dir = Path(config.save_dir).parent / f"baseline-{exp_start_time}"
 save_dir.mkdir(parents=True)
 
-heter_set = np.random.uniform(0, 1, (config.env_num, config.heter_num))
+heter_set = (
+    np.random.uniform(0, 1, (config.env_num, config.heter_num))
+    if args.no_heter is False
+    else np.full((config.env_num, config.heter_num), 0.5)
+)
 backup_config = {**copy.deepcopy(config), "heter_set": heter_set.tolist()}
 with open(save_dir / "config_backup.toml", "w") as f:
     pytoml.dump(backup_config, f)
