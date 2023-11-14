@@ -6,7 +6,6 @@ merge_interval = 100
 merge_num = 50
 merge_target = true
 episode_num_eval = 1
-embedding_dim = 0
 # 环境设置
 env_num = 20
 heter_num = 3

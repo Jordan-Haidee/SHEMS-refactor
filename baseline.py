@@ -43,7 +43,6 @@ ddpg_config_list = [
         "id": i,
         "heter": heter_set[i],
         "seed": config.seed + i,
-        "embedding_init": None,
         "lr": config.lr,
         "gamma": config.gamma,
         "hidden_dim": config.hidden_dim,
