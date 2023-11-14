@@ -7,7 +7,9 @@ from pathlib import Path
 import addict
 import numpy as np
 import pytoml
+import rich
 import torch
+from rich.panel import Panel
 
 from model import FedDDPG
 
@@ -65,5 +67,5 @@ model = FedDDPG(
     merge_target=config.merge_target,
     device=config.device,
 )
-print(f"Training..., result saves to: \n{save_dir.absolute()}")
+rich.print(Panel(f"Training..., result saves to: \n{save_dir.absolute()}"))
 model.train()
