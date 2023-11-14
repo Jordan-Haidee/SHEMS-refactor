@@ -70,8 +70,8 @@ class Actor(nn.Module):
         self.tanh = nn.Tanh()
         # 映射动作范围
         self.map_layer = nn.Linear(action_dim, action_dim)
-        self.map_layer.weight.data.copy_(torch.diag(self.action_map[:, 0]))
-        self.map_layer.bias.data.copy_(self.action_map[:, 1])
+        self.map_layer.weight.data.copy_(torch.diag(self.action_mapping[:, 0]))
+        self.map_layer.bias.data.copy_(self.action_mapping[:, 1])
         self.map_layer.requires_grad_(False)
 
     def forward(self, state_tensor):
@@ -86,7 +86,7 @@ class Actor(nn.Module):
 
     @property
     @functools.lru_cache
-    def action_map(self) -> List[Callable]:
+    def action_mapping(self) -> List[Callable]:
         maps = []
         for x1, x2 in self.action_scope:
             A = [[-1, 1], [1, 1]]
