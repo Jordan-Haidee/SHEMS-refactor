@@ -74,8 +74,14 @@ class Actor(nn.Module):
         self.map_layer.bias.data.copy_(self.action_mapping[:, 1])
         self.map_layer.requires_grad_(False)
 
-    def forward(self, state_tensor):
-        x = self.fc1(state_tensor)
+    def forward(self, state_tensor, embedding_tensor=None):
+        if embedding_tensor is None:
+            input_tensor = state_tensor
+        else:
+            if state_tensor.ndim > 1:
+                embedding_tensor = embedding_tensor.repeat(*state_tensor.shape[:-1], 1)
+            input_tensor = torch.cat([state_tensor, embedding_tensor], dim=-1)
+        x = self.fc1(input_tensor)
         x = self.relu1(x)
         x = self.fc2(x)
         x = self.relu2(x)
@@ -107,10 +113,15 @@ class Critic(nn.Module):
         self.relu2 = nn.ReLU()
         self.fc3 = nn.Linear(hidden_dim, 1)
 
-    def forward(self, state_tensor, action_tensor):
+    def forward(self, state_tensor, action_tensor, embedding_tensor=None):
         """网络输入是状态和动作, 因此需要cat在一起"""
-        x = torch.cat([state_tensor, action_tensor], dim=-1)
-        x = self.fc1(x)
+        if embedding_tensor is None:
+            input_tensor = torch.cat([state_tensor, action_tensor], dim=-1)
+        else:
+            if state_tensor.ndim > 1:
+                embedding_tensor = embedding_tensor.repeat(*state_tensor.shape[:-1], 1)
+            input_tensor = torch.cat([state_tensor, embedding_tensor, action_tensor], dim=-1)
+        x = self.fc1(input_tensor)
         x = self.relu1(x)
         x = self.fc2(x)
         x = self.relu2(x)
@@ -125,6 +136,7 @@ class DDPG:
         id: int,
         heter: np.ndarray,
         seed: Union[int, None] = None,
+        embedding_init: np.ndarray = None,
         lr: float = 1e-3,
         tau: float = 0.005,
         gamma: float = 0.98,
@@ -144,14 +156,27 @@ class DDPG:
         state_dim = self.env.observation_space.shape[0]
         action_dim = self.env.action_space.shape[0]
         action_scope = list(zip(self.env.action_space.low, self.env.action_space.high))
-        self.actor = Actor(state_dim, hidden_dim, action_dim, action_scope).to(device)
-        self.critic = Critic(state_dim, hidden_dim, action_dim).to(device)
-        self.actor_target = Actor(state_dim, hidden_dim, action_dim, action_scope).to(device)
-        self.critic_target = Critic(state_dim, hidden_dim, action_dim).to(device)
+        if embedding_init is None:
+            self.embedding = None
+            self.actor = Actor(state_dim, hidden_dim, action_dim, action_scope).to(device)
+            self.critic = Critic(state_dim, hidden_dim, action_dim).to(device)
+            self.actor_target = Actor(state_dim, hidden_dim, action_dim, action_scope).to(device)
+            self.critic_target = Critic(state_dim, hidden_dim, action_dim).to(device)
+            self.actor_optimizer = optim.Adam(self.actor.parameters(), lr / 10)
+            self.critic_optimizer = optim.Adam(self.critic.parameters(), lr)
+        else:
+            self.embedding = torch.from_numpy(embedding_init).float().requires_grad_(True)
+            embedding_dim = self.embedding.shape[0]
+            self.actor = Actor(state_dim + embedding_dim, hidden_dim, action_dim, action_scope).to(device)
+            self.critic = Critic(state_dim + embedding_dim, hidden_dim, action_dim).to(device)
+            self.actor_target = Actor(state_dim + embedding_dim, hidden_dim, action_dim, action_scope).to(device)
+            self.critic_target = Critic(state_dim + embedding_dim, hidden_dim, action_dim).to(device)
+            self.actor_optimizer = optim.Adam(self.actor.parameters(), lr / 10)
+            self.critic_optimizer = optim.Adam(self.critic.parameters(), lr)
+            self.actor_optimizer.add_param_group({"params": self.embedding})
+            self.critic_optimizer.add_param_group({"params": self.embedding})
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.critic_target.load_state_dict(self.critic.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr / 10)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr)
         self.tau = tau
         self.gamma = gamma
         self.device = device
@@ -161,8 +186,9 @@ class DDPG:
         # 训练时使用
         self.episode = 0
         self.episode_reward = 0
+        self.period_reward = 0
         self.episode_reward_list = []
-        self.episode_len = 0
+        self.period_reward_list = []
         self.global_step = 0
         self.total_train_batchs = train_batchs
         assert save_dir is not None
@@ -181,7 +207,7 @@ class DDPG:
             a = self.env.action_space.sample()
         else:
             s_ = self.env.unwrapped.normalize_state(s)
-            a = self.actor(s_)
+            a = self.actor(s_, self.embedding)
             a = a.cpu().numpy()
         return a
 
@@ -228,15 +254,15 @@ class DDPG:
         # 计算critic_loss并更新
         with torch.no_grad():
             td_targets = rewards + self.gamma * (1 - dones) * self.critic_target(
-                next_states, self.actor_target(next_states)
+                next_states, self.actor_target(next_states, self.embedding), self.embedding
             )
-        td_errors = td_targets - self.critic(states, actions)
+        td_errors = td_targets - self.critic(states, actions, self.embedding)
         critic_loss = torch.pow(td_errors, 2).mean()
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
         # 计算actor_loss并更新
-        actor_loss = -self.critic(states, self.actor(states)).mean()
+        actor_loss = -self.critic(states, self.actor(states, self.embedding), self.embedding).mean()
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
@@ -253,6 +279,7 @@ class DDPG:
             a = self.get_action(self.state, self.epsilon)
             ns, r, t1, t2, _ = self.env.step(a)
             self.episode_reward += r
+            self.period_reward += r
             self.replay_buffer.push(
                 self.env.unwrapped.normalize_state(self.state),
                 a,
@@ -269,20 +296,21 @@ class DDPG:
             self.log_info_per_batch(actor_loss, critic_loss)
 
     def log_info_per_episode(self):
-        self.logger.add_scalar("Train/episode_reward", self.episode_reward, self.episode)
-        self.logger.add_scalar("Train/buffer_size", self.replay_buffer.size, self.episode)
-        self.logger.add_scalar("Episode/episode_len", self.episode_len, self.episode)
+        self.logger.add_scalar("Reward/episode_reward", self.episode_reward, self.episode)
+        self.logger.add_scalar("Buffer/buffer_size", self.replay_buffer.size, self.episode)
         self.episode_reward_list.append(self.episode_reward)
         self.episode += 1
-        self.episode_len = 0
         self.episode_reward = 0
 
     def log_info_per_batch(self, actor_loss, critic_loss):
         self.logger.add_scalar("Loss/actor_loss", actor_loss, self.global_step)
         self.logger.add_scalar("Loss/critic_loss", critic_loss, self.global_step)
-        self.logger.add_scalar("Train/epsilon", self.epsilon, self.global_step)
+        self.logger.add_scalar("Epsilon/epsilon", self.epsilon, self.global_step)
         self.global_step += 1
-        self.episode_len += 1
+        if self.global_step % 240 == 0:
+            self.logger.add_scalar("Reward/period_reward", self.period_reward, self.global_step)
+            self.period_reward_list.append(self.period_reward)
+            self.period_reward = 0
 
     def save(self, save_path: str):
         params = {"actor": self.actor.state_dict(), "critic": self.critic.state_dict()}
@@ -376,31 +404,9 @@ class FedDDPG:
             p.logger.close()
         self.logger.close()
 
-    def evaluate_point_reward(self, point: DDPG):
-        """传入一个节点, 评估奖励(不改变环境状态)"""
-        env = point.env_for_test
-        point_r = 0
-        for _ in range(self.episode_num_eval):
-            s, _ = env.reset()
-            while True:
-                a = point.get_action(s)
-                ns, r, t1, t2, _ = env.step(a)
-                point_r += r
-                s = ns
-                if t1 or t2:
-                    break
-        return point_r / self.episode_num_eval
-
-    def evaluate_avg_reward(self):
-        """评估每个节点的奖励并取平均"""
-        reward_list = []
-        for p in self.points:
-            point_r = self.evaluate_point_reward(p)
-            reward_list.append(point_r)
-        return sum(reward_list) / len(reward_list)
-
     def summarize_point_reward(self):
-        """统计每个point在训练过程中已经完成的episode的奖励, 并按最短的长度取平均"""
+        """统计每个point在训练过程中已经完成的episode/period的奖励, 并按最短的长度取平均"""
+        # summarize episode reward
         min_length = min([len(p.episode_reward_list) for p in self.points])
         table = []
         for p in self.points:
@@ -410,9 +416,23 @@ class FedDDPG:
         (
             plt.plot(range(min_length), avg_episode_reward),
             plt.grid(),
-            plt.title("average episode reward"),
+            plt.title("Average Episode Reward"),
         )
         plt.savefig(self.save_dir / "global" / "average_episode_reward.svg")
+        plt.close()
+        # summarize period reward
+        min_length = min([len(p.period_reward_list) for p in self.points])
+        table = []
+        for p in self.points:
+            table.append(p.period_reward_list[:min_length])
+            np.save(p.save_dir / "period_reward_list.npy", np.array(p.period_reward_list))
+        avg_period_reward = np.array(table).mean(0)
+        (
+            plt.plot(range(min_length), avg_period_reward),
+            plt.grid(),
+            plt.title("Average Period Reward"),
+        )
+        plt.savefig(self.save_dir / "global" / "average_period_reward.svg")
         plt.close()
 
     def save(self, save_path):
@@ -421,5 +441,6 @@ class FedDDPG:
         params = {
             "actor": self.server.actor.state_dict(),
             "critic": self.server.critic.state_dict(),
+            "embeddings": [p.embedding for p in self.points],
         }
         torch.save(params, save_path)

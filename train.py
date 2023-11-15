@@ -37,7 +37,7 @@ heter_set = (
 )
 backup_config = {**copy.deepcopy(config), "heter_set": heter_set.tolist()}
 if config.embedding_dim > 0:
-    embedding_set = np.random.uniform(-1, 1, (config.env_num, config.embedding_dim))
+    embedding_set = np.random.normal(0, 1, (config.env_num, config.embedding_dim))
     backup_config.update({"embedding_set": embedding_set.tolist()})
 with open(save_dir / "config_backup.toml", "w") as f:
     pytoml.dump(backup_config, f)
@@ -47,12 +47,12 @@ ddpg_config_list = [
         "env": config.env,
         "id": i,
         "heter": heter_set[i],
+        "embedding_init": embedding_set[i] if config.embedding_dim > 0 else None,
         "seed": config.seed + i,
         "hidden_dim": config.hidden_dim,
         "lr": config.lr,
         "gamma": config.gamma,
         "tau": config.tau,
-        "embedding_init": embedding_set[i] if config.embedding_dim > 0 else None,
         "buffer_capicity": config.buffer_capicity,
         "buffer_init_ratio": config.buffer_init_ratio,
         "batch_size": config.batch_size,

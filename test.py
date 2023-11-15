@@ -41,16 +41,21 @@ point_record_list: List[List[Record]] = []
 # collect info
 for i in trange(config.env_num, ncols=80, desc="collecting info->"):
     env = gym.make(config.env, heter=config.heter_set[i], is_test=True if not args.valid else False)
-    actor = Actor(state_dim, config.hidden_dim, action_dim, action_scope)
+    actor = Actor(state_dim + config.embedding_dim, config.hidden_dim, action_dim, action_scope)
+    params = torch.load(save_dir / f"point-{i}" / "latest.pt")
     try:
-        actor.load_state_dict(torch.load(save_dir / f"point-{i}" / "latest.pt").get("actor"))
+        actor.load_state_dict(params.get("actor"))
     except TypeError:
-        actor.load_state_dict(torch.load(save_dir / f"point-{i}" / "latest.pt").get("weights").get("actor"))
+        actor.load_state_dict(params.get("weights").get("actor"))
+    try:
+        embedding = params.get("embeddings")[i]
+    except TypeError:
+        embedding = None
     traj: List[Record] = []
     s, _ = env.reset()
     with torch.no_grad():
         while True:
-            a = actor(torch.from_numpy(env.unwrapped.normalize_state(s))).numpy()
+            a = actor(torch.from_numpy(env.unwrapped.normalize_state(s)), embedding).numpy()
             ns, r, t1, t2, info = env.step(a)
             c1, c2, c3 = info.values()
             traj.append(Record(s, env.unwrapped.clip_action(a), r, t1 or t2, c1, c2, c3))
