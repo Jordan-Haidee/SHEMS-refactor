@@ -3,7 +3,7 @@ save_dir = "result/FedDDPG-Avg"
 seed = 100
 device = "cpu"
 merge_interval = 100
-merge_num = 50
+merge_num = 60
 merge_target = true
 episode_num_eval = 1
 # 环境设置

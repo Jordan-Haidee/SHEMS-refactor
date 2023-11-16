@@ -61,26 +61,24 @@ class Actor(nn.Module):
         assert len(action_scope) == action_dim
         self.action_scope = action_scope
         # 定义网络结构
-        self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.relu1 = nn.ReLU()
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.relu2 = nn.ReLU()
-        self.fc3 = nn.Linear(hidden_dim, action_dim)
-        # tanh将输出限制在(-1,+1)之间
-        self.tanh = nn.Tanh()
-        # 映射动作范围
+        self.unshared_layers = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            nn.ReLU(),
+        )
+        self.shared_layers = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, action_dim),
+            nn.Tanh(),
+        )
         self.map_layer = nn.Linear(action_dim, action_dim)
         self.map_layer.weight.data.copy_(torch.diag(self.action_mapping[:, 0]))
         self.map_layer.bias.data.copy_(self.action_mapping[:, 1])
         self.map_layer.requires_grad_(False)
 
     def forward(self, state_tensor):
-        x = self.fc1(state_tensor)
-        x = self.relu1(x)
-        x = self.fc2(x)
-        x = self.relu2(x)
-        x = self.fc3(x)
-        x = self.tanh(x)
+        x = self.unshared_layers(state_tensor)
+        x = self.shared_layers(x)
         x = self.map_layer(x)
         return x
 
@@ -101,20 +99,21 @@ class Critic(nn.Module):
 
     def __init__(self, state_dim, hidden_dim, action_dim):
         super().__init__()
-        self.fc1 = nn.Linear(state_dim + action_dim, hidden_dim)
-        self.relu1 = nn.ReLU()
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.relu2 = nn.ReLU()
-        self.fc3 = nn.Linear(hidden_dim, 1)
+        self.unshared_layers = nn.Sequential(
+            nn.Linear(state_dim + action_dim, hidden_dim),
+            nn.ReLU(),
+        )
+        self.shared_layers = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1),
+        )
 
     def forward(self, state_tensor, action_tensor):
         """网络输入是状态和动作, 因此需要cat在一起"""
         x = torch.cat([state_tensor, action_tensor], dim=-1)
-        x = self.fc1(x)
-        x = self.relu1(x)
-        x = self.fc2(x)
-        x = self.relu2(x)
-        x = self.fc3(x)
+        x = self.unshared_layers(x)
+        x = self.shared_layers(x)
         return x
 
 
@@ -161,7 +160,9 @@ class DDPG:
         # 训练时使用
         self.episode = 0
         self.episode_reward = 0
+        self.period_reward = 0
         self.episode_reward_list = []
+        self.period_reward_list = []
         self.episode_len = 0
         self.global_step = 0
         self.total_train_batchs = train_batchs
@@ -253,6 +254,7 @@ class DDPG:
             a = self.get_action(self.state, self.epsilon)
             ns, r, t1, t2, _ = self.env.step(a)
             self.episode_reward += r
+            self.period_reward += r
             self.replay_buffer.push(
                 self.env.unwrapped.normalize_state(self.state),
                 a,
@@ -268,10 +270,22 @@ class DDPG:
             actor_loss, critic_loss = self.train_one_batch()
             self.log_info_per_batch(actor_loss, critic_loss)
 
+    def freeze_shared_params(self):
+        """冻结共享层参数"""
+        param_groups = [self.actor.shared_layers.parameters(), self.critic.shared_layers.parameters()]
+        for param_group in param_groups:
+            for p in param_group:
+                p.requires_grad_(False)
+
+    def reduce_lr(self):
+        for param_group in self.actor_optimizer.param_groups:
+            param_group["lr"] /= 10
+        for param_group in self.critic_optimizer.param_groups:
+            param_group["lr"] /= 10
+
     def log_info_per_episode(self):
-        self.logger.add_scalar("Train/episode_reward", self.episode_reward, self.episode)
-        self.logger.add_scalar("Train/buffer_size", self.replay_buffer.size, self.episode)
-        self.logger.add_scalar("Episode/episode_len", self.episode_len, self.episode)
+        self.logger.add_scalar("Reward/episode_reward", self.episode_reward, self.episode)
+        self.logger.add_scalar("Buffer/buffer_size", self.replay_buffer.size, self.episode)
         self.episode_reward_list.append(self.episode_reward)
         self.episode += 1
         self.episode_len = 0
@@ -280,9 +294,13 @@ class DDPG:
     def log_info_per_batch(self, actor_loss, critic_loss):
         self.logger.add_scalar("Loss/actor_loss", actor_loss, self.global_step)
         self.logger.add_scalar("Loss/critic_loss", critic_loss, self.global_step)
-        self.logger.add_scalar("Train/epsilon", self.epsilon, self.global_step)
+        self.logger.add_scalar("Epsilon/epsilon", self.epsilon, self.global_step)
         self.global_step += 1
         self.episode_len += 1
+        if self.global_step % 240 == 0:
+            self.logger.add_scalar("Reward/period_reward", self.period_reward, self.global_step)
+            self.period_reward_list.append(self.period_reward)
+            self.period_reward = 0
 
     def save(self, save_path: str):
         params = {"actor": self.actor.state_dict(), "critic": self.critic.state_dict()}
@@ -352,17 +370,25 @@ class FedDDPG:
 
     def train(self):
         """总共合并训练self.merge_num次"""
+        threshold = self.merge_num * 5 // 6
         with trange(self.merge_num, ncols=80) as prog_bar:
             for m in range(self.merge_num):
-                for p in tqdm(self.points, leave=False, disable=True):
-                    p.train(self.merge_interval)
-                self.server.merge_params(self.merge_target)
+                if m < threshold:
+                    for p in tqdm(self.points, leave=False, disable=True):
+                        p.train(self.merge_interval)
+                    self.server.merge_params(self.merge_target)
+                elif m == threshold:
+                    for p in self.points:
+                        p.freeze_shared_params()
+                        p.reduce_lr()
+                        p.train(self.merge_interval)
+                else:
+                    for p in tqdm(self.points, leave=False, disable=True):
+                        p.train(self.merge_interval)
                 prog_bar.update()
-                if m % self.save_interval == 0 and m != 0:
-                    self.save(self.save_dir / "server" / f"merge_{m}.pt")
         self.summarize_point_reward()
         for p in self.points:
-            self.save(p.save_dir / "latest.pt")
+            p.save(p.save_dir / "latest.pt")
             p.logger.close()
         self.logger.close()
 
@@ -414,12 +440,17 @@ class FedDDPG:
         )
         plt.savefig(self.save_dir / "global" / "average_episode_reward.svg")
         plt.close()
-
-    def save(self, save_path):
-        """保存权重"""
-        Path(save_path).parent.mkdir(exist_ok=True)
-        params = {
-            "actor": self.server.actor.state_dict(),
-            "critic": self.server.critic.state_dict(),
-        }
-        torch.save(params, save_path)
+        # summarize period reward
+        min_length = min([len(p.period_reward_list) for p in self.points])
+        table = []
+        for p in self.points:
+            table.append(p.period_reward_list[:min_length])
+            np.save(p.save_dir / "period_reward_list.npy", np.array(p.period_reward_list))
+        avg_period_reward = np.array(table).mean(0)
+        (
+            plt.plot(range(min_length), avg_period_reward),
+            plt.grid(),
+            plt.title("Average Period Reward"),
+        )
+        plt.savefig(self.save_dir / "global" / "average_period_reward.svg")
+        plt.close()

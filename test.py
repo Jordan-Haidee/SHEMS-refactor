@@ -59,8 +59,9 @@ for i in trange(config.env_num, ncols=80, desc="collecting info->"):
                 point_record_list.append(traj)
                 break
 
-# save info
+# analyze info of n envs and save.
 table_list: List[pd.DataFrame] = []
+summary_table_list: List[pd.DataFrame] = []
 for i in trange(config.env_num, ncols=80, desc="summarizing info->"):
     traj = point_record_list[i]
     detailed_table = pd.DataFrame(
@@ -92,6 +93,7 @@ for i in trange(config.env_num, ncols=80, desc="summarizing info->"):
         },
     )
     summary_table.to_csv(report_dir / f"point-{i}" / "summary.csv")
+    summary_table_list.append(summary_table)
     table_list.append(detailed_table)
     fig, axes = plt.subplots(6, 1, figsize=(90, 20))
     xticks = np.arange(0, 24 * (env.unwrapped.day_duration + 1), 24)
@@ -115,7 +117,13 @@ for i in trange(config.env_num, ncols=80, desc="summarizing info->"):
         )
     fig.savefig(report_dir / f"point-{i}" / "run_details.svg")
 
-# analyze avg performance
+# gather info of n envs and save
+Path(report_dir / "global").mkdir()
+pd.concat(summary_table_list, axis=0).reset_index().drop("index", axis=1).to_csv(
+    report_dir / "global" / f"summary-of-{config.env_num}-envs.csv"
+)
+
+# compute avg performance
 avg_total_cost = np.array([table["Total Cost"].sum() for table in table_list]).mean()
 avg_energy_cost = np.array([table["Energy Cost"].sum() for table in table_list]).mean()
 avg_discomfort_cost = np.array([table["Discomfort Cost"].sum() for table in table_list]).mean()
